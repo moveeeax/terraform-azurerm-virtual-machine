@@ -47,7 +47,7 @@ jobs:
 
       # tests/ uses mock_provider, which needs Terraform >= 1.7. The module
       # itself still only requires >= 1.5 — this pin is test-only.
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
