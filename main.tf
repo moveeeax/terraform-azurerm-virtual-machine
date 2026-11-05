@@ -2,8 +2,12 @@ resource "azurerm_linux_virtual_machine" "this" {
   name                = var.name
   resource_group_name = var.resource_group_name
   location            = var.location
-  size                = var.size
-  admin_username      = var.admin_username
+  # The default (Standard_B2s) is on the azurerm tflint ruleset's
+  # retired/announced-for-retirement list. Changing the default would resize
+  # existing callers' VMs, so it is kept until the next major release.
+  # tflint-ignore: azurerm_linux_virtual_machine_retired_size
+  size           = var.size
+  admin_username = var.admin_username
 
   # Set explicitly rather than relying on the provider default so the module's
   # documented "SSH keys only" contract cannot change underneath it.

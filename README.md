@@ -13,7 +13,7 @@ on by default, and the OS disk supports a customer-managed key.
 
 ```hcl
 module "virtual_machine" {
-  source = "github.com/moveeeax/terraform-azurerm-virtual-machine"
+  source = "github.com/moveeeax/terraform-azurerm-virtual-machine?ref=v1.0.0"
 
   name                = "app-vm"
   resource_group_name = "prod-rg"
@@ -39,7 +39,10 @@ A runnable example lives in [`examples/basic`](examples/basic).
 | Name      | Version  |
 |-----------|----------|
 | terraform | >= 1.5   |
-| azurerm   | >= 3.0, < 5.0 |
+| azurerm   | >= 3.0, < 6.0 |
+
+CI validates and tests the module against the 3.0.0 floor and the latest
+azurerm 5.x release; 6.x is excluded until it has been tested.
 
 ## Inputs
 
