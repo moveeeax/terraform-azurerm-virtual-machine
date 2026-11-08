@@ -4,7 +4,16 @@
 # Run from the repository root with `terraform test`. No Azure credentials and
 # no network access are needed — every provider call is mocked.
 
-mock_provider "azurerm" {}
+# The NIC ID is pinned to a well-formed one because azurerm_linux_virtual_machine
+# validates the shape of network_interface_ids, and OpenTofu fills mocked
+# attributes in during plan rather than leaving them unknown.
+mock_provider "azurerm" {
+  mock_resource "azurerm_network_interface" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Network/networkInterfaces/test-vm-nic"
+    }
+  }
+}
 
 variables {
   name                  = "test-vm"
@@ -110,12 +119,147 @@ run "rejects_a_private_key_as_the_public_key" {
   expect_failures = [var.admin_ssh_public_key]
 }
 
-run "rejects_an_empty_network_interface_list" {
+run "existing_network_interfaces_are_attached_unchanged" {
+  command = plan
+
+  assert {
+    condition     = length(azurerm_network_interface.this) == 0
+    error_message = "No network interface may be created when network_interface_ids is set; existing deployments must plan the same."
+  }
+
+  assert {
+    condition     = tolist(azurerm_linux_virtual_machine.this.network_interface_ids) == tolist(var.network_interface_ids)
+    error_message = "The passed-in network interface IDs must be attached as-is."
+  }
+}
+
+run "creates_a_network_interface_from_a_subnet" {
+  command = plan
+
+  variables {
+    network_interface_ids = []
+    subnet_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/test-vnet/subnets/test-snet"
+  }
+
+  assert {
+    condition     = length(azurerm_network_interface.this) == 1
+    error_message = "Exactly one network interface must be created when subnet_id is set."
+  }
+
+  assert {
+    condition     = azurerm_network_interface.this[0].name == "test-vm-nic"
+    error_message = "The network interface must default to the name \"<name>-nic\"."
+  }
+
+  assert {
+    condition     = azurerm_network_interface.this[0].ip_configuration[0].subnet_id == var.subnet_id
+    error_message = "The network interface must be placed in subnet_id."
+  }
+
+  assert {
+    condition     = azurerm_network_interface.this[0].ip_configuration[0].private_ip_address_allocation == "Dynamic"
+    error_message = "Without private_ip_address the private IP must be allocated dynamically."
+  }
+
+  assert {
+    condition     = azurerm_network_interface.this[0].ip_configuration[0].public_ip_address_id == null
+    error_message = "No public IP may be attached unless public_ip_address_id is set."
+  }
+}
+
+run "created_network_interface_accepts_static_ip_and_public_ip" {
+  command = plan
+
+  variables {
+    network_interface_ids  = []
+    subnet_id              = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/test-vnet/subnets/test-snet"
+    network_interface_name = "custom-nic"
+    private_ip_address     = "10.0.1.10"
+    public_ip_address_id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Network/publicIPAddresses/test-pip"
+  }
+
+  assert {
+    condition     = azurerm_network_interface.this[0].name == "custom-nic"
+    error_message = "network_interface_name must override the default NIC name."
+  }
+
+  assert {
+    condition     = azurerm_network_interface.this[0].ip_configuration[0].private_ip_address_allocation == "Static"
+    error_message = "Setting private_ip_address must switch allocation to Static."
+  }
+
+  assert {
+    condition     = azurerm_network_interface.this[0].ip_configuration[0].private_ip_address == "10.0.1.10"
+    error_message = "private_ip_address must be passed through to the network interface."
+  }
+
+  assert {
+    condition     = azurerm_network_interface.this[0].ip_configuration[0].public_ip_address_id == var.public_ip_address_id
+    error_message = "public_ip_address_id must be passed through to the network interface."
+  }
+}
+
+run "rejects_neither_network_interface_ids_nor_subnet_id" {
   command = plan
 
   variables {
     network_interface_ids = []
   }
 
-  expect_failures = [var.network_interface_ids]
+  expect_failures = [azurerm_linux_virtual_machine.this]
+}
+
+run "rejects_both_network_interface_ids_and_subnet_id" {
+  command = plan
+
+  variables {
+    subnet_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/test-vnet/subnets/test-snet"
+  }
+
+  expect_failures = [azurerm_linux_virtual_machine.this]
+}
+
+run "rejects_nic_settings_with_existing_network_interfaces" {
+  command = plan
+
+  variables {
+    private_ip_address = "10.0.1.10"
+  }
+
+  expect_failures = [azurerm_linux_virtual_machine.this]
+}
+
+run "rejects_a_subnet_name_instead_of_an_id" {
+  command = plan
+
+  variables {
+    network_interface_ids = []
+    subnet_id             = "test-snet"
+  }
+
+  expect_failures = [var.subnet_id]
+}
+
+run "rejects_an_invalid_private_ip_address" {
+  command = plan
+
+  variables {
+    network_interface_ids = []
+    subnet_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/test-vnet/subnets/test-snet"
+    private_ip_address    = "10.0.1.256"
+  }
+
+  expect_failures = [var.private_ip_address]
+}
+
+run "rejects_a_public_ip_name_instead_of_an_id" {
+  command = plan
+
+  variables {
+    network_interface_ids = []
+    subnet_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/test-vnet/subnets/test-snet"
+    public_ip_address_id  = "test-pip"
+  }
+
+  expect_failures = [var.public_ip_address_id]
 }

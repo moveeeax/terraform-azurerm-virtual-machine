@@ -3,11 +3,13 @@
 Terraform module that manages an [Azure](https://azure.microsoft.com/) Linux
 virtual machine. It provisions a single VM from a marketplace image with
 SSH-key authentication (password login disabled) and a managed OS disk, and
-attaches one or more pre-existing network interfaces.
+either attaches one or more pre-existing network interfaces or creates a single
+network interface in a subnet you name.
 
-The module creates no public IP and no network interface of its own — network
-exposure is entirely determined by the NICs you pass in. Boot diagnostics are
-on by default, and the OS disk supports a customer-managed key.
+The module never creates a public IP. Network exposure is determined by the
+NICs you pass in, or, for the NIC the module creates, by the subnet and the
+optional existing public IP you attach to it. Boot diagnostics are on by
+default, and the OS disk supports a customer-managed key.
 
 ## Usage
 
@@ -34,6 +36,43 @@ module "virtual_machine" {
 
 A runnable example lives in [`examples/basic`](examples/basic).
 
+### Network interface
+
+Set exactly one of `network_interface_ids` or `subnet_id`:
+
+- `network_interface_ids` attaches NICs you manage yourself; the first is
+  primary. Use it for several NICs, accelerated networking, custom DNS
+  servers or anything else the module does not expose.
+- `subnet_id` (with `network_interface_ids` left empty) makes the module create
+  one NIC, named `<name>-nic` unless `network_interface_name` is set, with a
+  single IP configuration in that subnet. The private IP is dynamic unless
+  `private_ip_address` is set, and `public_ip_address_id` attaches an existing
+  public IP.
+
+```hcl
+module "virtual_machine" {
+  source = "github.com/moveeeax/terraform-azurerm-virtual-machine?ref=v1.2.0"
+
+  name                = "app-vm"
+  resource_group_name = "prod-rg"
+  location            = "eastus"
+
+  admin_ssh_public_key = file("~/.ssh/id_rsa.pub")
+
+  subnet_id          = module.subnet.id
+  private_ip_address = "10.0.1.10" # optional; omit for a dynamic IP
+}
+```
+
+Whether the module creates a NIC is decided by `network_interface_ids` being
+empty, not by `subnet_id`, so `subnet_id` may be the not-yet-known ID of a
+subnet created in the same apply. Passing both, neither, or the NIC-only
+inputs together with `network_interface_ids` fails at plan time.
+
+Switching an existing VM from `network_interface_ids` to `subnet_id` (or back)
+swaps the NIC the VM is attached to. Read the plan before applying it, and
+prefer picking one mode per VM up front.
+
 ## Requirements
 
 | Name      | Version  |
@@ -54,7 +93,11 @@ azurerm 5.x release; 6.x is excluded until it has been tested.
 | `size`                         | SKU size of the virtual machine.                                         | `string`       | `"Standard_B2s"` |    no    |
 | `admin_username`               | Administrator username for the virtual machine.                          | `string`       | `"azureuser"`    |    no    |
 | `admin_ssh_public_key`         | OpenSSH-formatted public key granted access to the admin account.        | `string`       | n/a              |   yes    |
-| `network_interface_ids`        | List of network interface IDs to attach. The first is primary.           | `list(string)` | n/a              |   yes    |
+| `network_interface_ids`        | Existing network interface IDs to attach. The first is primary. Leave empty to use `subnet_id`. | `list(string)` | `[]` | no |
+| `subnet_id`                    | Subnet in which the module creates one NIC. Only when `network_interface_ids` is empty. | `string` | `null` | no |
+| `network_interface_name`       | Name of the NIC the module creates. `null` uses `<name>-nic`.            | `string`       | `null`           |    no    |
+| `private_ip_address`           | Static private IPv4 address of the NIC the module creates. `null` is dynamic. | `string`  | `null`           |    no    |
+| `public_ip_address_id`         | Existing public IP attached to the NIC the module creates.               | `string`       | `null`           |    no    |
 | `os_disk_caching`              | Caching mode of the OS disk. One of `None`, `ReadOnly`, `ReadWrite`.     | `string`       | `"ReadWrite"`    |    no    |
 | `os_disk_storage_account_type` | Storage account type of the OS disk.                                     | `string`       | `"Premium_LRS"`  |    no    |
 | `os_disk_disk_encryption_set_id` | Disk encryption set used to encrypt the OS disk with a customer-managed key. | `string`  | `null`           |    no    |
@@ -85,6 +128,8 @@ az feature register --namespace Microsoft.Compute --name EncryptionAtHost
 | `name`               | Name of the virtual machine.                             |
 | `private_ip_address` | Primary private IP address of the virtual machine.       |
 | `public_ip_address`  | Primary public IP address of the virtual machine, if any.|
+| `network_interface_id` | ID of the NIC created by the module, or `null` when `network_interface_ids` was passed. |
+| `network_interface_ids` | IDs of all NICs attached to the virtual machine.       |
 
 ## Development
 

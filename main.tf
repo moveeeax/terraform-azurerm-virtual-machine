@@ -1,3 +1,30 @@
+locals {
+  # The module creates its own network interface only when no existing NIC IDs
+  # are passed in. This keys off the length of the list, which is known at plan
+  # time even when the IDs themselves are not, rather than off subnet_id, which
+  # is often the not-yet-known ID of a subnet created in the same apply and
+  # would make `count` unresolvable.
+  create_network_interface = length(var.network_interface_ids) == 0
+}
+
+resource "azurerm_network_interface" "this" {
+  count = local.create_network_interface ? 1 : 0
+
+  name                = coalesce(var.network_interface_name, "${var.name}-nic")
+  resource_group_name = var.resource_group_name
+  location            = var.location
+
+  ip_configuration {
+    name                          = "primary"
+    subnet_id                     = var.subnet_id
+    private_ip_address_allocation = var.private_ip_address == null ? "Dynamic" : "Static"
+    private_ip_address            = var.private_ip_address
+    public_ip_address_id          = var.public_ip_address_id
+  }
+
+  tags = var.tags
+}
+
 resource "azurerm_linux_virtual_machine" "this" {
   name                = var.name
   resource_group_name = var.resource_group_name
@@ -18,7 +45,7 @@ resource "azurerm_linux_virtual_machine" "this" {
   # feature to be registered on the subscription first.
   encryption_at_host_enabled = var.encryption_at_host_enabled
 
-  network_interface_ids = var.network_interface_ids
+  network_interface_ids = local.create_network_interface ? [azurerm_network_interface.this[0].id] : var.network_interface_ids
 
   admin_ssh_key {
     username   = var.admin_username
@@ -52,4 +79,19 @@ resource "azurerm_linux_virtual_machine" "this" {
   }
 
   tags = var.tags
+
+  # Cross-variable checks live here rather than in variable validation blocks
+  # because those can only reference other variables from Terraform 1.9, and
+  # the module supports >= 1.5.
+  lifecycle {
+    precondition {
+      condition     = local.create_network_interface == (var.subnet_id != null)
+      error_message = "Set exactly one of network_interface_ids (attach existing NICs) or subnet_id (the module creates one NIC)."
+    }
+
+    precondition {
+      condition     = local.create_network_interface || (var.private_ip_address == null && var.public_ip_address_id == null && var.network_interface_name == null)
+      error_message = "private_ip_address, public_ip_address_id and network_interface_name only apply to the NIC the module creates; leave them unset when passing network_interface_ids."
+    }
+  }
 }
