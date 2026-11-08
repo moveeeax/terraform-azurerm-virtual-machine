@@ -36,12 +36,47 @@ variable "admin_ssh_public_key" {
 }
 
 variable "network_interface_ids" {
-  description = "List of network interface IDs to attach to the virtual machine. The first is primary."
+  description = "List of existing network interface IDs to attach to the virtual machine. The first is primary. Leave empty and set subnet_id to have the module create a single network interface instead."
   type        = list(string)
+  default     = []
+}
+
+variable "subnet_id" {
+  description = "ID of the subnet in which the module creates the virtual machine's network interface. Only used when network_interface_ids is empty; exactly one of the two must be set."
+  type        = string
+  default     = null
 
   validation {
-    condition     = length(var.network_interface_ids) > 0
-    error_message = "At least one network interface ID must be provided."
+    condition     = var.subnet_id == null ? true : can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft.Network/virtualNetworks/[^/]+/subnets/[^/]+$", var.subnet_id))
+    error_message = "The subnet_id must be the full Azure resource ID of a subnet, e.g. \"/subscriptions/.../resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet/subnets/snet\"."
+  }
+}
+
+variable "network_interface_name" {
+  description = "Name of the network interface the module creates. Null uses \"<name>-nic\". Only valid together with subnet_id."
+  type        = string
+  default     = null
+}
+
+variable "private_ip_address" {
+  description = "Static private IP address for the network interface the module creates. Null lets Azure assign one dynamically. Only valid together with subnet_id."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.private_ip_address == null ? true : can(cidrhost("${var.private_ip_address}/32", 0))
+    error_message = "The private_ip_address must be a single IPv4 address, e.g. \"10.0.1.10\"."
+  }
+}
+
+variable "public_ip_address_id" {
+  description = "ID of an existing public IP address to attach to the network interface the module creates. Null attaches none. Only valid together with subnet_id."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.public_ip_address_id == null ? true : can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft.Network/publicIPAddresses/[^/]+$", var.public_ip_address_id))
+    error_message = "The public_ip_address_id must be the full Azure resource ID of a public IP address."
   }
 }
 
